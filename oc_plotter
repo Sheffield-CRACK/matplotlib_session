@@ -1,0 +1,64 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import astropy.units as u
+from astropy.table import Table
+from scipy import optimize
+import pandas as pd
+import sys
+sys.path.insert(0, '/local/php24aly/')
+
+from functions import SDSStoCSS_changer
+### INPUTS ###
+
+object = 'SDSS_J1005+2249'
+
+##############
+
+#check for CSS name for etimes file, and change if needed
+object = SDSStoCSS_changer(object, etimes=False)
+
+#read the data
+data = Table.read('/local/php24aly/o-c/{}_etimes.txt'.format(object), format='ascii') #input the etimes data
+
+#read T0 and period from the systems.csv file
+systems = pd.read_csv('/local/php24aly/o-c/systems.csv', sep=',')
+row = systems.loc[systems['Data_path']==(object + '_etimes.txt')]
+
+T0 = row['T0'].to_string(index=False)
+period = row['Porb'].to_string(index=False)
+
+#define functions
+def ephemeris(cycle, t0, per):
+    mjd = t0 + (cycle * per)
+    return mjd
+
+def chisq(pars, x, obs, err):
+    t0, per = pars
+    e = ephemeris(x, t0, per)
+    resid = ((obs - e)**2) / (err**2)
+    return np.sum(resid)
+
+#find the new fitted ephemeris
+guess = (T0, period) #input initial ephemeris values
+res = optimize.minimize(chisq, guess, args=(data['Cycle'], data['MJD(BTDB)'], data['err']), method='Nelder-Mead')
+
+print('T0 =', res.x[0])
+print('period =', res.x[1])
+
+#O-C using given ephemeris
+cycle_num = data['Cycle']
+obs_t = data['MJD(BTDB)']
+
+calc_t = []
+calc_t.append(res.x[0] + (cycle_num * res.x[1]))
+
+yax = obs_t - calc_t
+yax = np.reshape(yax, (len(cycle_num),))
+
+plt.plot(cycle_num, yax, '.', color='black', zorder=1)
+plt.errorbar(cycle_num, yax, data['err'], fmt='.', color='black', ecolor='black', alpha=0.65, zorder=2)
+plt.gca().ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+plt.ylabel('O-C')
+plt.xlabel('Cycle Number')
+plt.savefig('/local/php24aly/o-c/{}_plot'.format(object))
+plt.show()
